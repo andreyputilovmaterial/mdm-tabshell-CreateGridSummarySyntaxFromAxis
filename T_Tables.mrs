@@ -1,21 +1,4 @@
-﻿' -----------------------------------------------------------------------
-' IPS Table Shell Version 7.0.1
-'
-
-
-
-
-
-
-
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-'''' PF7 - GexaFutureUse - Summary of Not very likely - Based to Those Asked
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-'' PC: Use same nets as PF3
-'' Base Categories On: Those Asked (for each stub)
-'' Category Base Logic: GexaFutureUse[cat].GV is not null
-'axis = GridSummaryBase(TableDoc, "TV_GexaFutureUse_Nets", "GV", "NotVeryLikely", "", "False")
-'Set table = CreateTable(logMe, tableDoc, bannerNumber, "GexaFutureUse_1", "", axis, "PF7 - GexaFutureUse - Summary of Not very likely - Classical approach - Based to Those Asked")
+﻿
 
 
 
@@ -82,7 +65,7 @@ GexaFutureUse {
 ' as you can see in the above, the syntax does not have to be perfect - just what is normally working
 ' the only problem is that if this syntax is not perfect, if fails early, not just skips the table, as usual; but the error message is normally printed, so you can update accordingly and address - should not be a problem
 axis = CreateGridSummarySyntaxFromAxis( tabledoc, axis, "GV", "NotVeryLikely", True )
-Set table = CreateTable(logMe, tableDoc, bannerNumber, "GexaFutureUse_2", "", axis, "PF7 - GexaFutureUse - Summary of Not very likely - Testing new approach - Based to Those Asked")
+set table = tabledoc.Tables.AddNew( "GexaFutureUse_2", axis, "PF7 - GexaFutureUse - Summary of Not very likely - Testing new approach - Based to Those Asked" )
 
 
 
