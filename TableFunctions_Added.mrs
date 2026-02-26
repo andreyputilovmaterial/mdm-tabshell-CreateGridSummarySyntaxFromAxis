@@ -1,0 +1,252 @@
+﻿
+
+
+
+
+
+
+
+
+' AP 2/26/2026
+function GridSummaryFromSyntax_ExtractStubsFromNetExpression(sExpressionString)
+	dim SyntaxExpr_RegEx, SyntaxExpr_RegEx_Matches, sIncludedElementsString
+	set SyntaxExpr_RegEx = CreateObject("VBScript.RegExp")
+	SyntaxExpr_RegEx.Pattern = "^\s*(?:\w+|\[\s*LevelId\s*\])\s*=\*\s*\{\s*(.*?)\s*\}\s*$"
+	SyntaxExpr_RegEx.IgnoreCase = True
+	SyntaxExpr_RegEx.Global = True
+    set SyntaxExpr_RegEx_Matches = SyntaxExpr_RegEx.Execute(sExpressionString)
+    if SyntaxExpr_RegEx_Matches.Count>0 then
+	    sIncludedElementsString  = ctext(SyntaxExpr_RegEx_Matches[0].submatches.item[0])
+		sIncludedElementsString = replace(replace(sIncludedElementsString,mr.Tab,"")," ","")
+		GridSummaryFromSyntax_ExtractStubsFromNetExpression = sIncludedElementsString
+	else
+		GridSummaryFromSyntax_ExtractStubsFromNetExpression = "" ' TODO: or null? In other languages, I'd have raised an exception. Here, in vbs, not sure what is the easiest way to handle if expression is not an expression, does not follow the pattern
+		' I'll just return an empty string so that I can still call split() and it returns nothing and continues and does not break
+		' TODO: raise an error?
+	end if
+end function
+
+' AP 2/26/2026
+function GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sIncludedElementsString, sGridColumn, sExprRightPart )
+	dim sUpdatedExpressionSyntax, bIsFirst, sStub
+	sIncludedElementsString = replace(replace(sIncludedElementsString,mr.Tab,"")," ","")
+	sUpdatedExpressionSyntax = ""
+	bIsFirst = true
+	for each sStub in split(sIncludedElementsString,",")
+		'sUpdatedExpressionSyntax = sUpdatedExpressionSyntax + iif(bIsFirst,""," Or ") + "("+sQuestionName+"[{"+sStub+"}]."+sGridColumn+""+sExprRightPart+")" ' do we need parentheses?
+		sUpdatedExpressionSyntax = sUpdatedExpressionSyntax + iif(bIsFirst,""," Or ") + "^."+sQuestionName+"[{"+sStub+"}]."+sGridColumn+""+sExprRightPart+""
+		bIsFirst = false
+	next
+	GridSummaryFromSyntax_MakeExpressionSyntax = sUpdatedExpressionSyntax
+end function
+
+' AP 2/26/2026
+function GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oSourceElementWithProperties )
+	dim oTempElement, sTempDummyIdAdded, lElementPosition
+	lElementPosition = 0 ' just random, adding to the beginning
+	sTempDummyIdAdded = "TEMP_02364527_"
+	set oTempElement = oElementsCollection.AddNew( ""+sTempDummyIdAdded+""+sNewElement_Name+"", sNewElement_Type, lElementPosition )
+	oTempElement.Label = sNewElement_Label
+	if sNewElement_Type = 23 or sNewElement_Type = 24 or sNewElement_Type = 1 then
+		' we only process custom element with expression, unweighted base, or base; everything else should not come through this fn, or expression should be skipped (for example, we skip for effective base)
+		oTempElement.Expression = sNewElement_Expression
+	end if
+	' transfer all other known properties
+	if oSourceElementWithProperties.ColumnText then oTempElement.ColumnText = oSourceElementWithProperties.ColumnText
+	if oSourceElementWithProperties.CountsOnly then oTempElement.CountsOnly = oSourceElementWithProperties.CountsOnly
+	'if oSourceElementWithProperties.CutOffValue then oTempElement.CutOffValue = oSourceElementWithProperties.CutOffValue ' should not be modified
+	if oSourceElementWithProperties.Decimals then oTempElement.Decimals = oSourceElementWithProperties.Decimals
+	if oSourceElementWithProperties.Factor is not null then oTempElement.Factor = oSourceElementWithProperties.Factor
+	if oSourceElementWithProperties.IsFixed then oTempElement.IsFixed = oSourceElementWithProperties.IsFixed
+	if oSourceElementWithProperties.IsHidden then oTempElement.IsHidden = oSourceElementWithProperties.IsHidden
+	if oSourceElementWithProperties.IsHiddenWhenColumn then oTempElement.IsHiddenWhenColumn = oSourceElementWithProperties.IsHiddenWhenColumn
+	if oSourceElementWithProperties.IsHiddenWhenRow then oTempElement.IsHiddenWhenRow = oSourceElementWithProperties.IsHiddenWhenRow
+	if oSourceElementWithProperties.Multiplier then oTempElement.Multiplier = oSourceElementWithProperties.Multiplier
+	if not (sNewElement_Type = 24 or sNewElement_Type = 3) then
+		' do not add on unweightedbase and effectivebase
+		if oSourceElementWithProperties.Weight then oTempElement.Weight = oSourceElementWithProperties.Weight
+	end if
+	' and return the result
+	GridSummaryFromSyntax_MakeSpecificationSyntax = oTempElement.Specification
+	' bring back the normal name, remove the "temp" part
+	GridSummaryFromSyntax_MakeSpecificationSyntax = replace( GridSummaryFromSyntax_MakeSpecificationSyntax, ""+sTempDummyIdAdded+""+sNewElement_Name+"", sNewElement_Name )
+	' and de-level
+	' the syntax we managed to add to an element was at variable level
+	' newly created syntax should address from top level, from axis({})
+	' do not worry, custom elements are not processed with this - we only use this fn to add new elements
+	' so if you have ^. somewhere in expressions, it is not getting changed
+	GridSummaryFromSyntax_MakeSpecificationSyntax = replace( GridSummaryFromSyntax_MakeSpecificationSyntax, oTempElement.Expression, replace( oTempElement.Expression, "^.", "" ) )
+	oElementsCollection.Remove(""+sTempDummyIdAdded+""+sNewElement_Name+"")
+end function
+
+' AP 2/26/2026
+function GridSummaryFromSyntax_ProcessElements( oElementsCollection, sQuestionName, sGridColumn, sCats, bOptions_ShouldAddIndividualBases )
+	dim sResult
+	' [print('Name: {n}, Type: {t}, Label: \'{l}\', expression: \'{e}\''.format(n=el.Name,t=el.Type,l=el.Label,e=el.Expression)) for el in tabledoc.Tables['temp4'].Axes[0].SubAxes[0].Elements]
+	dim oElement, sElementName, lElementType, sElementLabel ' , lElementPosition
+	dim sAppendedSpecPiece
+	dim sNewElement_StubsIterate, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression
+	dim bNeedAddedUnweightedBase, bNeedAddedBase, bNeedAddedEffectiveBase
+	
+	bNeedAddedUnweightedBase = bOptions_ShouldAddIndividualBases and APPLY_WEIGHT
+	bNeedAddedBase = bOptions_ShouldAddIndividualBases
+	bNeedAddedEffectiveBase = bOptions_ShouldAddIndividualBases and ADD_EFF_BASE
+	
+	sResult = ""
+	
+	'lElementPosition = 0
+	for each oElement in oElementsCollection
+		sAppendedSpecPiece = ", " + oElement.Specification
+		sElementName = oElement.Name
+		lElementType = oElement.Type
+		select case lElementType
+			case 0
+				' normal element in a variable
+				
+				sNewElement_StubsIterate = sElementName
+				sAppendedSpecPiece = ""
+				
+				if bNeedAddedUnweightedBase then
+					sNewElement_Name = "ubase_"+sElementName
+					sNewElement_Label = "Unweighted Base"
+					sNewElement_Type = 24
+					sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " is not null" )
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				if bNeedAddedBase then
+					sNewElement_Name = "base_"+sElementName
+					sNewElement_Label = "Base"
+					sNewElement_Type = 1
+					sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " is not null" )
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				if bNeedAddedEffectiveBase then
+					sNewElement_Name = "ebase_"+sElementName
+					sNewElement_Label = "Effective Base"
+					sNewElement_Type = 3
+					sNewElement_Expression = ""
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				sNewElement_Name = sElementName
+				sNewElement_Label = oElement.Label
+				sNewElement_Type = 23
+				sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " =* {"+sCats+"}" )
+				sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				
+			case 21
+				' "net" statement
+				
+				sNewElement_StubsIterate = GridSummaryFromSyntax_ExtractStubsFromNetExpression(oElement.Expression)
+				sAppendedSpecPiece = ""
+				
+				if bNeedAddedUnweightedBase then
+					sNewElement_Name = "ubase_"+sElementName
+					sNewElement_Label = "Unweighted Base"
+					sNewElement_Type = 24
+					sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " is not null" )
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				if bNeedAddedBase then
+					sNewElement_Name = "base_"+sElementName
+					sNewElement_Label = "Base"
+					sNewElement_Type = 1
+					sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " is not null" )
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				if bNeedAddedEffectiveBase then
+					sNewElement_Name = "ebase_"+sElementName
+					sNewElement_Label = "Effective Base"
+					sNewElement_Type = 3
+					sNewElement_Expression = ""
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				sNewElement_Name = sElementName
+				sNewElement_Label = oElement.Label
+				sNewElement_Type = 23
+				sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " =* {"+sCats+"}" )
+				sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				
+				' and now add entries for all nested items
+				sAppendedSpecPiece = sAppendedSpecPiece + GridSummaryFromSyntax_ProcessElements( oElement.SubElements, sQuestionName, sGridColumn, sCats, bOptions_ShouldAddIndividualBases )
+				
+			case 22
+				' "combine" statement
+				
+				sNewElement_StubsIterate = GridSummaryFromSyntax_ExtractStubsFromNetExpression(oElement.Expression)
+				sAppendedSpecPiece = ""
+				
+				if bNeedAddedUnweightedBase then
+					sNewElement_Name = "ubase_"+sElementName
+					sNewElement_Label = "Unweighted Base"
+					sNewElement_Type = 24
+					sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " is not null" )
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				if bNeedAddedBase then
+					sNewElement_Name = "base_"+sElementName
+					sNewElement_Label = "Base"
+					sNewElement_Type = 1
+					sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " is not null" )
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				if bNeedAddedEffectiveBase then
+					sNewElement_Name = "ebase_"+sElementName
+					sNewElement_Label = "Effective Base"
+					sNewElement_Type = 3
+					sNewElement_Expression = ""
+					sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				end if
+				
+				sNewElement_Name = sElementName
+				sNewElement_Label = oElement.Label
+				sNewElement_Type = 23
+				sNewElement_Expression = GridSummaryFromSyntax_MakeExpressionSyntax( sQuestionName, sNewElement_StubsIterate, sGridColumn, " =* {"+sCats+"}" )
+				sAppendedSpecPiece = sAppendedSpecPiece + ", " + GridSummaryFromSyntax_MakeSpecificationSyntax( oElementsCollection, sNewElement_Name, sNewElement_Label, sNewElement_Type, sNewElement_Expression, oElement )
+				
+			' everything else should be skipped as is - base elements, text, etc... everything should be left as is
+		end select
+		'lElementPosition = lElementPosition + 1
+		
+		sResult = sResult + sAppendedSpecPiece
+		
+	next
+	
+	GridSummaryFromSyntax_ProcessElements = sResult
+end function
+
+' AP 2/26/2026
+function CreateGridSummarySyntaxFromAxis( tabledoc, axis, sGridColumn, sCats, bOptions_ShouldAddIndividualBases )
+	dim oDummyTable, sDummyTableName
+	dim sSpecificationString, sQuestionName
+	
+	' create a dummy table
+	' I really hate it but I don't know how else can I achieve something like document.CreateELement() without appending it to tree
+	' or, create a nwe tabledoc, in memory - that's definitely clearer, we don't pollute where we should not, but it would be significantly slower, so not an option either
+	sDummyTableName = "TEMP_GridSummaryNew_1" ' aaaaahhh really hate it... we should not add anything, we should not pollute the global tabledoc space
+	set oDummyTable = tabledoc.Tables.AddNew( sDummyTableName, axis, "TEMP - created by GridSummaryAxisNew()" )
+	
+	sSpecificationString = ""
+	
+	sQuestionName = oDummyTable.Axes[0].SubAxes[0].Name
+	sSpecificationString = sSpecificationString + GridSummaryFromSyntax_ProcessElements( oDummyTable.Axes[0].SubAxes[0].Elements, sQuestionName, sGridColumn, sCats, bOptions_ShouldAddIndividualBases )
+	
+	' and delete the dummy table back
+	' really hate it
+	tabledoc.Tables.Remove( sDummyTableName )
+	
+	CreateGridSummarySyntaxFromAxis = "axis({ "+replace(replace("<<BEGIN>>"+sSpecificationString,"<<BEGIN>>, ",""),"<<BEGIN>>","")+" })" ' to remove leading comma
+	
+end function
+
+
+
+
+

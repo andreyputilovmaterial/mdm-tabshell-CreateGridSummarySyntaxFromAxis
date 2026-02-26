@@ -1,0 +1,74 @@
+﻿
+
+
+
+' you can use factor(), decimals, weight, fixed, hidden...
+' reorder or add nets...
+' if team needs average number of stubs selected, it can be normally added here too
+' just add any elements you need
+' syntax does not have to be perfect (as of indents, formatting, capitalization...) - just what is normally working
+axis = "!
+GexaFutureUse {
+	unwb 'Unweighted Base - for testing' unweightedbase( 'true'),
+	'Base, for testing' base('true'),
+	'Effective Base, for testing' effectiveBase(),
+	t1 'Some added ''text'' for testing' text(),
+	t2 'Total (added element with expression for testing)' expression('true'),
+	ReferFriendProgram,
+	_100GreenElectricity [weight   =Weight_Completes],
+	ElectricityPlansHome,
+	SolarBuybackElectricity,
+	TimeUseElectricity [isfixed=true],
+	FreeElectricityPlans [ishidden=false],
+	StableBillPlans [factor=777],
+	net_Solar 'NET: Solar' net({
+		HomeSolarQuote,
+		HomeSolarBattery,
+		net_solar2 'NET: testing sub-net' net({
+		HomeSolarMonitoring,
+		HomeSolar})
+	})
+	
+,
+	comb_test 'COMBINE: HomeSolarQuote, HomeSolarBattery, HomeSolarMonitoring, HomeSolar' combine({  HomeSolarQuote, HomeSolarBattery, HomeSolarMonitoring, HomeSolar })	
+	
+	
+	
+	,
+	BackupGenerators,
+	SolarEvBackup,
+	net_Digital'NET: Digital' net({
+		MobileApp,
+		OnlineToolsManage
+	}),
+	SmartThermostats,
+	PlansSeniorsAge,
+	EnergyRewardsProgram,
+	HomeWarranty,
+	PowerSurgeProtection,
+	ElectricityPlansElectric,
+	Level2Home,
+	Level2HomeInstallation,
+	ElectricVehicleSmart,
+	CarbonOffsetProgram,
+	FlatMonthlyBill,
+	HomeEnergyEfficiency
+}
+!"
+
+' parameters: tabledoc, axis spec syntax, col name, stubs for the summary, and a flag if to insert individual bases
+
+' if stubs should be hidden, you can add [ishidden=true], like in normal table syntax
+' or just skip the stub
+' you can add, reorder, use nets or combine statements, or any other custom elements
+' also, if custom weight is added to some stub, same weight is used in individual base
+' as you can see in the above, the syntax does not have to be perfect - just what is normally working
+' the only problem is that if this syntax is not perfect, if fails early, not just skips the table, as usual; but the error message is normally printed, so you can update accordingly and address - should not be a problem
+axis = CreateGridSummarySyntaxFromAxis( tabledoc, axis, "GV", "NotVeryLikely", True )
+set table = tabledoc.Tables.AddNew( "GexaFutureUse_2", axis, "PF7 - GexaFutureUse - Summary of Not very likely - Testing new approach - Based to Those Asked" )
+
+
+
+
+
+
